@@ -1,0 +1,20 @@
+services:
+  proxy:
+    build: ..
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - ca-certs:/etc/mwh
+
+  app:
+    build: ./external
+    network_mode: "service:proxy"
+    depends_on:
+      - proxy
+    volumes:
+      - ca-certs:/etc/mwh:ro
+    environment:
+      NODE_EXTRA_CA_CERTS: /etc/mwh/ca.crt
+
+volumes:
+  ca-certs:

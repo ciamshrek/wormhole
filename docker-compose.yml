@@ -1,0 +1,24 @@
+services:
+  proxy:
+    build: .
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - ./handler.ts:/app/handler.ts:ro
+      - ca-certs:/etc/mwh
+    environment:
+      MWH_DEV: "true"
+
+  app:
+    # Replace with your application image
+    build: ./path/to/your/app
+    network_mode: "service:proxy"
+    depends_on:
+      - proxy
+    volumes:
+      - ca-certs:/etc/mwh:ro
+    environment:
+      NODE_EXTRA_CA_CERTS: /etc/mwh/ca.crt
+
+volumes:
+  ca-certs:

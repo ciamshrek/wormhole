@@ -1,0 +1,33 @@
+services:
+  proxy:
+    build:
+      context: ../..
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - ../../handler.ts:/app/handler.ts:ro
+      - ca-certs:/etc/mwh
+
+  curl:
+    image: curlimages/curl:8.12.1
+    network_mode: "service:proxy"
+    depends_on:
+      - proxy
+    volumes:
+      - ca-certs:/etc/mwh:ro
+    environment:
+      REQUESTBIN_URL: ${REQUESTBIN_URL:?set REQUESTBIN_URL to your request bin URL}
+    entrypoint:
+      - /bin/sh
+      - -lc
+      - |
+        until [ -f /etc/mwh/ca.crt ]; do
+          sleep 1
+        done
+
+        exec curl --silent --show-error --fail \
+          --cacert /etc/mwh/ca.crt \
+          "$REQUESTBIN_URL"
+
+volumes:
+  ca-certs:

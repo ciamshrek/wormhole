@@ -1,0 +1,31 @@
+services:
+  echo-server:
+    build: ./echo-server
+    # Runs on its own network, accessible via Docker DNS as "echo-server"
+
+  proxy:
+    build: ..
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - ca-certs:/etc/mwh
+    depends_on:
+      - echo-server
+    environment:
+      # Proxy's upstream fetch must accept echo-server's self-signed cert
+      NODE_TLS_REJECT_UNAUTHORIZED: "0"
+
+  app:
+    build: ./app
+    network_mode: "service:proxy"
+    depends_on:
+      - proxy
+    volumes:
+      - ca-certs:/etc/mwh:ro
+    environment:
+      NODE_EXTRA_CA_CERTS: /etc/mwh/ca.crt
+      ECHO_URL: "https://echo-server/test-path?foo=bar"
+      HTTP_ECHO_URL: "http://echo-server/http-test?bar=baz"
+
+volumes:
+  ca-certs:
