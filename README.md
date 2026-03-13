@@ -90,17 +90,19 @@ services:
     image: your-app-image
     network_mode: "service:proxy"
     depends_on:
-      - proxy
+      proxy:
+        condition: service_healthy
     volumes:
       - ca-certs:/etc/mwh:ro
-    environment:
-      NODE_EXTRA_CA_CERTS: /etc/mwh/ca.crt  # see "CA Trust" section below
+    # Installs the CA into the system trust store, then runs your command
+    entrypoint: ["/etc/mwh/wormhole-ca-init.sh"]
+    command: ["node", "app.js"]
 
 volumes:
   ca-certs:
 ```
 
-Write a `handler.ts` with `onRequest` / `onResponse` hooks (both optional), then `docker compose up --build`. Every HTTP and HTTPS request your app makes flows through your handler. All other outbound TCP is blocked.
+Write a `handler.ts` with `onRequest` / `onResponse` hooks (both optional), then `docker compose up --build`. The proxy starts first, generates the CA, and your app waits until it's healthy before starting. Every HTTP and HTTPS request your app makes flows through your handler. All other outbound TCP is blocked.
 
 ## How It Works
 
@@ -174,19 +176,32 @@ If your handler throws, the proxy logs the error and falls back to passthrough b
 
 ## CA Trust
 
-The proxy generates a CA certificate at `/etc/mwh/ca.crt` on first startup. Your app container must trust this CA for HTTPS to work.
+The proxy generates a CA certificate at `/etc/mwh/ca.crt` on first startup. Your app container must trust this CA for HTTPS interception to work.
 
-The CA cert is shared via a Docker volume. Configure your app's runtime:
+### Option A: System trust store (recommended)
+
+Use the bundled init script as your app's entrypoint. It copies the CA into the system trust store and runs `update-ca-certificates` before starting your app:
+
+```yaml
+app:
+  entrypoint: ["/etc/mwh/wormhole-ca-init.sh"]
+  command: ["node", "app.js"]  # your original entrypoint
+```
+
+This works for most runtimes on Alpine and Debian-based images.
+
+### Option B: Environment variables
+
+If you can't change the entrypoint, or your runtime ignores the system store, set the appropriate env var:
 
 | Runtime | Environment Variable |
 |---------|---------------------|
-| **Node.js** | `NODE_EXTRA_CA_CERTS=/etc/mwh/ca.crt` or `NODE_OPTIONS=--use-openssl-ca` |
+| **Node.js** | `NODE_EXTRA_CA_CERTS=/etc/mwh/ca.crt` |
 | **Python (requests/httpx)** | `REQUESTS_CA_BUNDLE=/etc/mwh/ca.crt` |
 | **Python (stdlib/aiohttp)** | `SSL_CERT_FILE=/etc/mwh/ca.crt` |
 | **Go** | `SSL_CERT_FILE=/etc/mwh/ca.crt` |
 | **Ruby** | `SSL_CERT_FILE=/etc/mwh/ca.crt` |
 | **Java** | See below |
-| **System (Alpine/Debian)** | Handled automatically by the proxy's `update-ca-certificates` |
 
 **Java** requires importing into the JVM trust store:
 ```bash
@@ -214,7 +229,7 @@ keytool -importcert -noprompt -trustcacerts \
 # Unit tests (no Docker required — includes proxy, certs, handler, SNI)
 npm test
 
-# Full Docker integration test (iptables + echo-server → proxy → test client)
+# Full Docker integration test (iptables + proxy → httpbin.org)
 npm run test:docker
 ```
 

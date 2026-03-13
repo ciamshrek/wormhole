@@ -12,7 +12,8 @@ services:
     image: curlimages/curl:8.12.1
     network_mode: "service:proxy"
     depends_on:
-      - proxy
+      proxy:
+        condition: service_healthy
     volumes:
       - ca-certs:/etc/mwh:ro
     environment:
@@ -21,10 +22,6 @@ services:
       - /bin/sh
       - -lc
       - |
-        until [ -f /etc/mwh/ca.crt ]; do
-          sleep 1
-        done
-
         exec curl --silent --show-error --fail \
           --cacert /etc/mwh/ca.crt \
           "$TARGET_URL"

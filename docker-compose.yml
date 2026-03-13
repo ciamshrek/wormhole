@@ -6,19 +6,22 @@ services:
     volumes:
       - ./handler.ts:/app/handler.ts:ro
       - ca-certs:/etc/mwh
-    environment:
-      MWH_DEV: "true"
 
   app:
     # Replace with your application image
     build: ./path/to/your/app
     network_mode: "service:proxy"
     depends_on:
-      - proxy
+      proxy:
+        condition: service_healthy
     volumes:
       - ca-certs:/etc/mwh:ro
-    environment:
-      NODE_EXTRA_CA_CERTS: /etc/mwh/ca.crt
+    # Option A: install CA into system trust store (recommended)
+    entrypoint: ["/etc/mwh/wormhole-ca-init.sh"]
+    command: ["node", "app.js"]  # your original entrypoint
+    # Option B: use env vars instead (see CA Trust in README)
+    # environment:
+    #   NODE_EXTRA_CA_CERTS: /etc/mwh/ca.crt
 
 volumes:
   ca-certs:

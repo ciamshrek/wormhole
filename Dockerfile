@@ -1,6 +1,6 @@
 FROM node:22-alpine
 
-RUN apk add --no-cache iptables ca-certificates bash shadow
+RUN apk add --no-cache iptables bash shadow
 
 WORKDIR /app
 
@@ -9,7 +9,11 @@ RUN npm install
 
 COPY src/ ./src/
 COPY handler.ts tsconfig.json ./
+COPY wormhole-ca-init.sh ./
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
+
+HEALTHCHECK --interval=2s --timeout=2s --start-period=5s --retries=3 \
+  CMD nc -z 127.0.0.1 ${MWH_PORT:-3129}
 
 ENTRYPOINT ["/entrypoint.sh"]

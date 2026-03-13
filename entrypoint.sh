@@ -19,15 +19,9 @@ su -s /bin/sh mwhproxy -c "node --import tsx src/generate-ca.ts" || {
   exit 1
 }
 
-# Install CA into system trust store
-cp /etc/mwh/ca.crt /usr/local/share/ca-certificates/mwh-ca.crt || {
-  echo "[entrypoint] FATAL: Failed to copy CA certificate" >&2
-  exit 1
-}
-update-ca-certificates || {
-  echo "[entrypoint] FATAL: update-ca-certificates failed" >&2
-  exit 1
-}
+# Copy CA init script to shared volume so app containers can use it
+cp /app/wormhole-ca-init.sh /etc/mwh/wormhole-ca-init.sh
+chmod +x /etc/mwh/wormhole-ca-init.sh
 
 # iptables: bypass DNS over TCP, then redirect other outbound TCP to the multiplexer
 echo "[entrypoint] Setting up iptables redirect..."

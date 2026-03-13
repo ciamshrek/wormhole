@@ -1,12 +1,12 @@
 /**
- * Test client that makes HTTPS and HTTP requests to the echo-server
- * through the proxy and verifies that handler.ts mutations were applied.
+ * Test client that makes HTTPS and HTTP requests to httpbin.org through the
+ * proxy and verifies that handler.ts mutations were applied.
  */
 
-const ECHO_URL = process.env.ECHO_URL || "https://echo-server/test-path?foo=bar";
-const HTTP_ECHO_URL = process.env.HTTP_ECHO_URL || "http://echo-server/http-test?bar=baz";
+const HTTPS_URL = process.env.TARGET_URL || "https://httpbin.org/anything?test=wormhole";
+const HTTP_URL = process.env.HTTP_TARGET_URL || "http://httpbin.org/anything?test=wormhole-http";
 const MAX_RETRIES = 10;
-const RETRY_DELAY_MS = 2000;
+const RETRY_DELAY_MS = 3000;
 
 async function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -25,17 +25,19 @@ async function testRequest(url: string, label: string) {
       const body = await res.json();
 
       console.log(`[test-client] [${label}] Response status:`, res.status);
-      console.log(`[test-client] [${label}] Echo body:`, JSON.stringify(body, null, 2));
+      console.log(`[test-client] [${label}] Echoed headers:`, JSON.stringify(body.headers, null, 2));
 
-      // Verify the proxy's handler injected the header
-      const injectedHeader = body.headers?.["x-wormhole"];
-      if (injectedHeader !== "intercepted") {
+      // httpbin returns headers with title case keys
+      const injected =
+        body.headers?.["X-Wormhole"] ||
+        body.headers?.["x-wormhole"];
+
+      if (injected !== "intercepted") {
         throw new Error(
-          `Expected x-wormhole: intercepted, got: ${injectedHeader}`
+          `Expected x-wormhole: intercepted, got: ${injected}`
         );
       }
 
-      // Verify response was tagged by the proxy
       const proxiedBy = res.headers.get("x-proxied-by");
       if (proxiedBy !== "wormhole") {
         throw new Error(
@@ -60,13 +62,10 @@ async function testRequest(url: string, label: string) {
 }
 
 async function runTests() {
-  console.log("[test-client] Testing proxy interception...");
+  console.log("[test-client] Testing proxy interception via httpbin.org...");
 
-  // Test 1: HTTPS interception
-  await testRequest(ECHO_URL, "HTTPS");
-
-  // Test 2: HTTP interception
-  await testRequest(HTTP_ECHO_URL, "HTTP");
+  await testRequest(HTTPS_URL, "HTTPS");
+  await testRequest(HTTP_URL, "HTTP");
 
   console.log("[test-client] All checks passed!");
   process.exit(0);
