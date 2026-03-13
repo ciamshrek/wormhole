@@ -4,39 +4,77 @@ A transparent HTTP/HTTPS proxy sandbox for Docker. Drop it next to any container
 
 Write a TypeScript handler file, mount it into the proxy, and every request your app makes passes through your `onRequest` / `onResponse` hooks before hitting the real upstream. All other outbound traffic is blocked.
 
-## How It Works
-
 ```mermaid
 flowchart LR
-  subgraph ns["Shared network namespace"]
-    App["Your App"]
-    subgraph mux["TCP Multiplexer :3129"]
-      direction TB
-      peek{{"peek first byte"}}
-      peek -- "0x16 (TLS)" --> HTTPS["HTTPS Server\nTLS termination\ndynamic certs"]
-      peek -- "else" --> HTTP["HTTP Server"]
-    end
-    handler["handler.ts\nonRequest / onResponse"]
-  end
-
-  App -- "Outbound TCP except DNS\n(iptables REDIRECT)" --> peek
-  HTTPS --> handler
-  HTTP --> handler
-  handler -- "fetch" --> upstream["Real Upstream"]
+  App["Your Container"] -- all traffic --> Proxy["Proxy\n(your handler.ts)"] -- fetch --> Upstream["Actual Endpoint"]
 ```
-
-1. Your app container shares the proxy's network namespace (`network_mode: "service:proxy"`)
-2. An iptables rule redirects outbound TCP traffic to port `:3129`, while letting DNS through and exempting traffic from UID 1337 (the proxy itself)
-3. A TCP multiplexer peeks at the first byte of each connection: `0x16` (TLS) routes to the HTTPS server, anything else routes to the HTTP server
-4. For HTTPS, the proxy terminates TLS with a dynamically generated certificate for each domain, signed by a local CA
-5. Your `handler.ts` hooks inspect and mutate the request before it's forwarded upstream
-6. The proxy fetches the real upstream, passes the response through your `onResponse` hook
-7. Your app gets back a response as if it talked to the upstream directly
-8. All non-HTTP/HTTPS outbound traffic is blocked (sandbox mode)
 
 ## Quick Start
 
-### 1. Create `docker-compose.yml`
+The fastest way to see it work — a `curl` container hits [httpbin.org/headers](https://httpbin.org/headers) through the proxy. The curl container has no proxy logic, SDK, or custom code. It just makes a normal HTTPS request.
+
+```bash
+docker compose -f examples/curl/docker-compose.yml up --build
+```
+
+httpbin echoes back the request headers. You'll see the `X-Wormhole: intercepted` header that [`handler.ts`](./handler.ts) injected — proving the proxy mutated the request transparently.
+
+Point it at any URL with `TARGET_URL`:
+
+```bash
+TARGET_URL="https://your-api.com/endpoint" \
+docker compose -f examples/curl/docker-compose.yml up --build
+```
+
+### Edit the handler
+
+Open `handler.ts` — changes are picked up automatically (hot-reload, no restart). Both hooks are optional.
+
+**Inject auth into every request:**
+```ts
+export function onRequest(req: Request): Request {
+  const headers = new Headers(req.headers);
+  headers.set("authorization", "Bearer " + process.env.MY_TOKEN);
+  return new Request(req, { headers });
+}
+```
+
+**Block specific domains:**
+```ts
+export function onRequest(req: Request): Request | Response {
+  if (new URL(req.url).hostname === "tracking.example.com") {
+    return new Response("Blocked", { status: 403 });
+  }
+  return req;
+}
+```
+
+**Rewrite URLs (e.g., route to a mock):**
+```ts
+export function onRequest(req: Request): Request {
+  const url = new URL(req.url);
+  if (url.hostname === "api.stripe.com") {
+    url.hostname = "mock-stripe";
+    url.port = "4000";
+    return new Request(url, { method: req.method, headers: req.headers, body: req.body, duplex: "half" } as RequestInit);
+  }
+  return req;
+}
+```
+
+**Modify response bodies:**
+```ts
+export async function onResponse(res: Response, req: Request): Promise<Response> {
+  if (!req.url.includes("/api/config")) return res;
+  const config = await res.json();
+  config.featureFlag = true;
+  return new Response(JSON.stringify(config), { status: res.status, headers: res.headers });
+}
+```
+
+See [Handler API](#handler-api) for full details.
+
+### Use with your own app
 
 ```yaml
 services:
@@ -62,54 +100,18 @@ volumes:
   ca-certs:
 ```
 
-### 2. Write `handler.ts`
+Write a `handler.ts` with `onRequest` / `onResponse` hooks (both optional), then `docker compose up --build`. Every HTTP and HTTPS request your app makes flows through your handler. All other outbound TCP is blocked.
 
-```ts
-export function onRequest(req: Request): Request {
-  const headers = new Headers(req.headers);
+## How It Works
 
-  // Add auth to every outgoing request
-  headers.set("authorization", "Bearer " + process.env.MY_TOKEN);
-
-  // Log what's going out
-  console.log(`→ ${req.method} ${req.url}`);
-  return new Request(req, { headers });
-}
-
-export function onResponse(res: Response, req: Request): Response {
-  // Log what came back
-  console.log(`← ${res.status} ${req.url}`);
-  return res;
-}
-```
-
-Both hooks are optional. Skip either one and traffic passes through unmodified.
-
-### 3. Run
-
-```bash
-docker compose up --build
-```
-
-Every HTTP and HTTPS request your app makes now flows through your handler. All other outbound TCP is blocked.
-
-## Curl Demo
-
-If you want the smallest possible proof that interception happens outside the workload container, use the `curl` example in [`examples/curl-requestbin/docker-compose.yml`](./examples/curl-requestbin/docker-compose.yml).
-
-The app container in this setup is just `curlimages/curl`. It does not contain any proxy logic, SDK, or custom code. It only:
-- shares the proxy container's network namespace
-- mounts the generated CA cert read-only
-- makes a normal HTTPS request to your request bin
-
-Run it with your own request bin URL:
-
-```bash
-REQUESTBIN_URL="https://<your-request-bin-host>/<token>" \
-docker compose -f examples/curl-requestbin/docker-compose.yml up --build
-```
-
-Then inspect the captured request in your bin. You should see the header injected by [`handler.ts`](./handler.ts), which demonstrates that the mutation happened outside the `curl` container.
+1. Your app container shares the proxy's network namespace (`network_mode: "service:proxy"`)
+2. An iptables rule redirects outbound TCP traffic to port `:3129`, while letting DNS through and exempting traffic from UID 1337 (the proxy itself)
+3. A TCP multiplexer peeks at the first byte of each connection: `0x16` (TLS) routes to the HTTPS server, anything else routes to the HTTP server
+4. For HTTPS, the proxy terminates TLS with a dynamically generated certificate for each domain, signed by a local CA
+5. Your `handler.ts` hooks inspect and mutate the request before it's forwarded upstream
+6. The proxy fetches the real upstream, passes the response through your `onResponse` hook
+7. Your app gets back a response as if it talked to the upstream directly
+8. All non-HTTP/HTTPS outbound traffic is blocked (sandbox mode)
 
 ## Handler API
 
@@ -169,77 +171,6 @@ Changes to `handler.ts` are picked up automatically. Edit, save, and the next re
 
 If your handler throws, the proxy logs the error and falls back to passthrough behavior — the request/response proceeds unmodified. This means a buggy handler won't break your app's traffic.
 
-## Use Cases
-
-**Inject authentication:**
-```ts
-export function onRequest(req: Request) {
-  const headers = new Headers(req.headers);
-  headers.set("authorization", "Bearer " + getToken());
-  return new Request(req, { headers });
-}
-```
-
-**Log all external API calls:**
-```ts
-export function onRequest(req: Request) {
-  console.log(JSON.stringify({ method: req.method, url: req.url, ts: Date.now() }));
-  return req;
-}
-```
-
-**Rewrite URLs (e.g., route to a mock service):**
-```ts
-export function onRequest(req: Request) {
-  const url = new URL(req.url);
-
-  if (url.hostname === "api.stripe.com") {
-    url.hostname = "mock-stripe";
-    url.port = "4000";
-
-    return new Request(url, {
-      method: req.method,
-      headers: req.headers,
-      body: req.body,
-      duplex: "half",
-    } as RequestInit);
-  }
-
-  return req;
-}
-```
-
-**Modify response bodies:**
-```ts
-export async function onResponse(res: Response, req: Request) {
-  if (!req.url.includes("/api/config")) return res;
-
-  const config = await res.json();
-  config.featureFlag = true;
-
-  const headers = new Headers(res.headers);
-  headers.delete("content-length");
-
-  return new Response(JSON.stringify(config), {
-    status: res.status,
-    headers,
-  });
-}
-```
-
-**Block specific domains:**
-```ts
-export function onRequest(req: Request) {
-  const blocked = ["tracking.example.com", "ads.example.com"];
-  const host = new URL(req.url).hostname;
-
-  if (blocked.includes(host)) {
-    return new Response(`Blocked: ${host}`, { status: 403 });
-  }
-
-  return req;
-}
-```
 
 ## CA Trust
 
@@ -249,7 +180,7 @@ The CA cert is shared via a Docker volume. Configure your app's runtime:
 
 | Runtime | Environment Variable |
 |---------|---------------------|
-| **Node.js** | `NODE_EXTRA_CA_CERTS=/etc/mwh/ca.crt` |
+| **Node.js** | `NODE_EXTRA_CA_CERTS=/etc/mwh/ca.crt` or `NODE_OPTIONS=--use-openssl-ca` |
 | **Python (requests/httpx)** | `REQUESTS_CA_BUNDLE=/etc/mwh/ca.crt` |
 | **Python (stdlib/aiohttp)** | `SSL_CERT_FILE=/etc/mwh/ca.crt` |
 | **Go** | `SSL_CERT_FILE=/etc/mwh/ca.crt` |
@@ -286,71 +217,6 @@ npm test
 # Full Docker integration test (iptables + echo-server → proxy → test client)
 npm run test:docker
 ```
-
-The Docker E2E test verifies the complete flow for both HTTP and HTTPS:
-- Test client makes requests to an echo server through the proxy
-- iptables redirects traffic through the multiplexer
-- The handler injects `x-wormhole: intercepted`
-- Echo server confirms the header arrived
-- Test client verifies both request and response mutations
-
-## Project Structure
-
-```
-├── src/
-│   ├── index.ts             # Entry point — wires everything together
-│   ├── proxy-server.ts      # TCP multiplexer + HTTPS/HTTP servers with Hono
-│   ├── cert-manager.ts      # CA generation + per-domain cert cache
-│   ├── handler-loader.ts    # Dynamic import + hot reload of handler.ts
-│   ├── sni-parser.ts        # TLS ClientHello SNI extraction (utility)
-│   ├── generate-ca.ts       # Standalone CA generation script
-│   └── types.ts             # Handler hook type definitions
-├── handler.ts               # Your handler (mounted as volume)
-├── entrypoint.sh            # iptables setup, CA install, user creation
-├── Dockerfile
-├── docker-compose.yml
-├── examples/
-│   └── curl-requestbin/     # Minimal curl-only request bin demo
-└── test/
-    ├── unit/                # node:test unit tests (proxy, certs, handler, SNI)
-    ├── fixtures/            # TLS ClientHello buffer builders
-    ├── echo-server/         # Docker: HTTPS + HTTP echo server
-    ├── app/                 # Docker: test client
-    └── external/            # Docker: test against httpbin.org
-```
-
-## How the Sandbox Works
-
-The proxy process runs as UID 1337. The iptables rules:
-
-```bash
-# Let DNS over TCP bypass the proxy
-iptables -t nat -A OUTPUT -p tcp --dport 53 -j RETURN
-# Redirect other outbound TCP to the multiplexer (except proxy's own traffic)
-iptables -t nat -A OUTPUT -p tcp \
-  -m owner ! --uid-owner 1337 \
-  -j REDIRECT --to-ports 3129
-
-# Allow proxy (UID 1337) unrestricted outbound
-iptables -A OUTPUT -m owner --uid-owner 1337 -j ACCEPT
-# Allow DNS resolution
-iptables -A OUTPUT -p udp --dport 53 -j ACCEPT
-iptables -A OUTPUT -p tcp --dport 53 -j ACCEPT
-# Allow loopback for redirected traffic
-iptables -A OUTPUT -d 127.0.0.0/8 -j ACCEPT
-# Block everything else
-iptables -A OUTPUT -j DROP
-```
-
-This means:
-- **All HTTP/HTTPS** on any port passes through your handler
-- **DNS** works and bypasses the proxy (UDP/53 and TCP/53)
-- **The proxy** (UID 1337) can reach upstream servers
-- **Everything else** is blocked — no raw TCP, no non-HTTP protocols
-
-The multiplexer detects the protocol by peeking at the first byte of each connection:
-- `0x16` (TLS ClientHello) → routes to the HTTPS server (TLS termination + handler)
-- Anything else → routes to the HTTP server (handler)
 
 ## Limitations
 

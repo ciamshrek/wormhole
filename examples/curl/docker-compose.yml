@@ -16,7 +16,7 @@ services:
     volumes:
       - ca-certs:/etc/mwh:ro
     environment:
-      REQUESTBIN_URL: ${REQUESTBIN_URL:?set REQUESTBIN_URL to your request bin URL}
+      TARGET_URL: ${TARGET_URL:-https://httpbin.org/headers}
     entrypoint:
       - /bin/sh
       - -lc
@@ -27,7 +27,7 @@ services:
 
         exec curl --silent --show-error --fail \
           --cacert /etc/mwh/ca.crt \
-          "$REQUESTBIN_URL"
+          "$TARGET_URL"
 
 volumes:
   ca-certs:
