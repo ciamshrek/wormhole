@@ -4,8 +4,10 @@ RUN apk add --no-cache iptables bash shadow
 
 WORKDIR /app
 
+ENV NODE_ENV=production
+
 COPY package.json package-lock.json* ./
-RUN npm install
+RUN npm ci --omit=dev
 
 COPY src/ ./src/
 COPY handler.ts tsconfig.json ./

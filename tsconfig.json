@@ -5,13 +5,13 @@
     "moduleResolution": "Node16",
     "esModuleInterop": true,
     "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "noUncheckedIndexedAccess": true,
+    "noFallthroughCasesInSwitch": true,
+    "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
-    "outDir": "dist",
-    "rootDir": ".",
-    "declaration": true,
-    "resolveJsonModule": true,
-    "sourceMap": true
+    "resolveJsonModule": true
   },
-  "include": ["src/**/*.ts", "handler.ts"],
-  "exclude": ["node_modules", "dist", "test"]
+  "include": ["src/**/*.ts", "handler.ts", "test/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
 }

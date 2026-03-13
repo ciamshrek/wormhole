@@ -81,7 +81,7 @@ describe("applyRequestHandler", () => {
       method: "POST",
       body: "hello",
       duplex: "half",
-    });
+    } as RequestInit & { duplex: "half" });
 
     const result = await applyRequestHandler(handler, req);
 

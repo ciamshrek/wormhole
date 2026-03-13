@@ -8,15 +8,18 @@ import { getRequestListener } from "@hono/node-server";
 import { getSNICallback } from "./cert-manager.js";
 import { applyOnRequest, applyOnResponse } from "./handler-loader.js";
 
-const DEFAULT_PORT = parseInt(process.env.MWH_PORT || "3129", 10);
-const DEFAULT_UPSTREAM_TIMEOUT = parseInt(process.env.MWH_UPSTREAM_TIMEOUT || "30000", 10);
+const DEFAULT_PORT = parseIntegerEnv(process.env.MWH_PORT, 3129);
+const DEFAULT_UPSTREAM_TIMEOUT = parseIntegerEnv(process.env.MWH_UPSTREAM_TIMEOUT, 30000);
+const DEFAULT_FIRST_BYTE_TIMEOUT = parseIntegerEnv(process.env.MWH_FIRST_BYTE_TIMEOUT, 10000);
 
 export interface ProxyServerOpts {
   port?: number;
+  listenHost?: string;
   sniCallback?: (hostname: string, cb: (err: Error | null, ctx?: tls.SecureContext) => void) => void;
   onRequest?: (req: Request) => Promise<Request | Response>;
   onResponse?: (res: Response, req: Request) => Promise<Response>;
   upstreamTimeoutMs?: number;
+  firstByteTimeoutMs?: number;
 }
 
 export interface ProxyServers {
@@ -30,6 +33,7 @@ export interface ProxyServers {
 const HOP_BY_HOP_HEADERS = [
   "connection",
   "keep-alive",
+  "proxy-connection",
   "proxy-authenticate",
   "proxy-authorization",
   "te",
@@ -38,8 +42,33 @@ const HOP_BY_HOP_HEADERS = [
   "upgrade",
 ] as const;
 
+function parseIntegerEnv(value: string | undefined, fallback: number): number {
+  const parsed = Number.parseInt(value ?? "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function removeHopByHopHeaders(headers: Headers): Headers {
+  const connectionHeader = headers.get("connection");
+  const connectionTokens = connectionHeader
+    ? connectionHeader
+        .split(",")
+        .map((value) => value.trim().toLowerCase())
+        .filter(Boolean)
+    : [];
+
+  for (const header of HOP_BY_HOP_HEADERS) {
+    headers.delete(header);
+  }
+
+  for (const header of connectionTokens) {
+    headers.delete(header);
+  }
+
+  return headers;
+}
+
 export function normalizeUpstreamRequest(req: Request): Request {
-  const headers = new Headers(req.headers);
+  const headers = removeHopByHopHeaders(new Headers(req.headers));
   const targetUrl = new URL(req.url);
 
   headers.set("host", targetUrl.host);
@@ -52,19 +81,22 @@ export async function proxyUpstreamRequest(
   req: Request,
   opts: { upstreamTimeoutMs: number; customFetch?: typeof fetch }
 ): Promise<Response> {
-  return proxy(req.url, {
+  const init: Parameters<typeof proxy>[1] = {
     raw: req,
     signal: AbortSignal.timeout(opts.upstreamTimeoutMs),
-    customFetch: opts.customFetch,
+  };
+
+  if (opts.customFetch) {
+    init.customFetch = (request) => opts.customFetch!(request);
+  }
+
+  return proxy(req.url, {
+    ...init,
   });
 }
 
 export function normalizeOutgoingResponse(res: Response): Response {
-  const headers = new Headers(res.headers);
-
-  for (const header of HOP_BY_HOP_HEADERS) {
-    headers.delete(header);
-  }
+  const headers = removeHopByHopHeaders(new Headers(res.headers));
   headers.delete("content-length");
 
   return new Response(res.body, {
@@ -126,10 +158,12 @@ function createProxyApp(
  */
 export async function startProxyServer(opts?: ProxyServerOpts): Promise<ProxyServers> {
   const port = opts?.port ?? DEFAULT_PORT;
+  const listenHost = opts?.listenHost;
   const sniCallback = opts?.sniCallback ?? getSNICallback();
   const onRequest = opts?.onRequest ?? applyOnRequest;
   const onResponse = opts?.onResponse ?? applyOnResponse;
   const upstreamTimeoutMs = opts?.upstreamTimeoutMs ?? DEFAULT_UPSTREAM_TIMEOUT;
+  const firstByteTimeoutMs = opts?.firstByteTimeoutMs ?? DEFAULT_FIRST_BYTE_TIMEOUT;
 
   // Create HTTPS Hono app + server (listens on random localhost port)
   const httpsApp = createProxyApp("https", onRequest, onResponse, upstreamTimeoutMs);
@@ -162,8 +196,15 @@ export async function startProxyServer(opts?: ProxyServerOpts): Promise<ProxySer
   const multiplexer = net.createServer((socket) => {
     activeSockets.add(socket);
     socket.on("close", () => activeSockets.delete(socket));
+    socket.setTimeout(firstByteTimeoutMs);
+    socket.on("timeout", () => {
+      console.warn("[multiplexer] Closing idle connection before first byte");
+      socket.destroy();
+    });
 
     socket.once("data", (firstChunk) => {
+      socket.setTimeout(0);
+
       // TLS handshake record starts with content type 0x16
       const targetPort = firstChunk[0] === 0x16 ? httpsPort : httpPort;
 
@@ -189,11 +230,28 @@ export async function startProxyServer(opts?: ProxyServerOpts): Promise<ProxySer
     });
   });
 
-  await new Promise<void>((resolve) => {
-    multiplexer.listen(port, () => {
-      console.log(`[proxy-server] Multiplexer listening on port ${port}`);
+  await new Promise<void>((resolve, reject) => {
+    const onError = (err: Error) => reject(err);
+    multiplexer.once("error", onError);
+
+    const onListen = () => {
+      multiplexer.off("error", onError);
+      const address = multiplexer.address();
+      if (!address || typeof address === "string") {
+        reject(new Error("Multiplexer did not return an address"));
+        return;
+      }
+      const host = address.address.includes(":") ? `[${address.address}]` : address.address;
+      console.log(`[proxy-server] Multiplexer listening on ${host}:${address.port}`);
       resolve();
-    });
+    };
+
+    if (listenHost) {
+      multiplexer.listen(port, listenHost, onListen);
+      return;
+    }
+
+    multiplexer.listen(port, onListen);
   });
 
   const closeAll = async () => {

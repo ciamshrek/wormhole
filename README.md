@@ -221,13 +221,20 @@ keytool -importcert -noprompt -trustcacerts \
 | `MWH_PORT` | `3129` | Port the multiplexer listens on |
 | `MWH_CA_DIR` | `/etc/mwh` | Directory for CA cert and key |
 | `MWH_HANDLER_PATH` | `handler.ts` | Path to the handler file |
+| `MWH_FIRST_BYTE_TIMEOUT` | `10000` | Milliseconds to wait before dropping an idle client connection that never sends a request |
 | `MWH_UPSTREAM_TIMEOUT` | `30000` | Upstream request timeout in ms |
 
 ## Testing
 
 ```bash
+# Static verification
+npm run typecheck
+
 # Unit tests (no Docker required — includes proxy, certs, handler, SNI)
 npm test
+
+# Build distributable JS + declarations
+npm run build
 
 # Full Docker integration test (iptables + proxy → httpbin.org)
 npm run test:docker

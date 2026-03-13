@@ -1,11 +1,17 @@
 import fs from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import type { Handler } from "./types.js";
 
-const HANDLER_PATH = process.env.MWH_HANDLER_PATH || path.resolve("handler.ts");
+const HANDLER_PATH = path.resolve(process.env.MWH_HANDLER_PATH || "handler.ts");
 
 let currentHandler: Handler = {};
 let version = 0;
+
+function parseIntegerEnv(value: string | undefined, fallback: number): number {
+  const parsed = Number.parseInt(value ?? "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
 
 function cancelBody(body: ReadableStream<Uint8Array> | null): void {
   if (!body || body.locked) return;
@@ -23,11 +29,16 @@ async function loadHandler(): Promise<void> {
     }
 
     version++;
-    const module = await import(`${HANDLER_PATH}?v=${version}`);
-    currentHandler = {
-      onRequest: typeof module.onRequest === "function" ? module.onRequest : undefined,
-      onResponse: typeof module.onResponse === "function" ? module.onResponse : undefined,
-    };
+    const moduleUrl = `${pathToFileURL(HANDLER_PATH).href}?v=${version}`;
+    const module = await import(moduleUrl);
+    const nextHandler: Handler = {};
+    if (typeof module.onRequest === "function") {
+      nextHandler.onRequest = module.onRequest;
+    }
+    if (typeof module.onResponse === "function") {
+      nextHandler.onResponse = module.onResponse;
+    }
+    currentHandler = nextHandler;
     console.log("[handler-loader] Loaded handler from", HANDLER_PATH);
   } catch (err) {
     console.error("[handler-loader] Failed to load handler:", err);
@@ -40,7 +51,7 @@ export async function initHandlerLoader(): Promise<void> {
 
   // Use fs.watchFile (stat polling) instead of fs.watch (inotify).
   // fs.watch doesn't fire reliably on Docker bind mounts (especially Mac/Windows).
-  const POLL_INTERVAL = parseInt(process.env.MWH_WATCH_INTERVAL || "1000", 10);
+  const POLL_INTERVAL = parseIntegerEnv(process.env.MWH_WATCH_INTERVAL, 1000);
   fs.watchFile(HANDLER_PATH, { interval: POLL_INTERVAL }, (curr, prev) => {
     if (curr.mtimeMs !== prev.mtimeMs) {
       console.log("[handler-loader] Detected change, reloading...");

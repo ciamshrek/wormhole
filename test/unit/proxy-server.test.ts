@@ -6,12 +6,20 @@ import net from "node:net";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { once } from "node:events";
 import forge from "node-forge";
 import { CertManager } from "../../src/cert-manager.js";
-import { startProxyServer, type ProxyServers } from "../../src/proxy-server.js";
+import {
+  normalizeOutgoingResponse,
+  normalizeUpstreamRequest,
+  startProxyServer,
+  type ProxyServers,
+} from "../../src/proxy-server.js";
 
 // Allow self-signed certs for the entire integration test suite
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+
+const LOOPBACK_HOST = "127.0.0.1";
 
 function closeHttpServer(server?: http.Server | https.Server): Promise<void> {
   if (!server) return Promise.resolve();
@@ -65,11 +73,12 @@ describe("proxy-server HTTPS integration", () => {
         });
       }
     );
-    await new Promise<void>((resolve) => echoServer.listen(0, resolve));
+    await new Promise<void>((resolve) => echoServer.listen(0, LOOPBACK_HOST, resolve));
     echoPort = (echoServer.address() as any).port;
 
     servers = await startProxyServer({
       port: 0,
+      listenHost: LOOPBACK_HOST,
       sniCallback: certMgr.getSNICallback(),
       onRequest: async (req: Request) => {
         const url = new URL(req.url);
@@ -190,11 +199,12 @@ describe("proxy-server HTTP integration", () => {
         }));
       });
     });
-    await new Promise<void>((resolve) => echoServer.listen(0, resolve));
+    await new Promise<void>((resolve) => echoServer.listen(0, LOOPBACK_HOST, resolve));
     echoPort = (echoServer.address() as any).port;
 
     servers = await startProxyServer({
       port: 0,
+      listenHost: LOOPBACK_HOST,
       sniCallback: certMgr.getSNICallback(),
       onRequest: async (req: Request) => {
         const url = new URL(req.url);
@@ -297,6 +307,7 @@ describe("proxy-server error handling", () => {
   it("returns 502 when upstream is unreachable", async () => {
     const servers = await startProxyServer({
       port: 0,
+      listenHost: LOOPBACK_HOST,
       sniCallback: certMgr.getSNICallback(),
       onRequest: async (req: Request) => {
         return new Request("https://localhost:1/unreachable", {
@@ -346,11 +357,12 @@ describe("proxy-server error handling", () => {
       },
       () => { /* intentionally never respond */ }
     );
-    await new Promise<void>((resolve) => hangServer.listen(0, resolve));
+    await new Promise<void>((resolve) => hangServer.listen(0, LOOPBACK_HOST, resolve));
     const hangPort = (hangServer.address() as any).port;
 
     const servers = await startProxyServer({
       port: 0,
+      listenHost: LOOPBACK_HOST,
       sniCallback: certMgr.getSNICallback(),
       onRequest: async (req: Request) => {
         return new Request(`https://localhost:${hangPort}/hang`, {
@@ -433,7 +445,7 @@ describe("multiplexer TLS detection", () => {
         res.end(JSON.stringify({ proto: "https", path: req.url }));
       }
     );
-    await new Promise<void>((resolve) => httpsEchoServer.listen(0, resolve));
+    await new Promise<void>((resolve) => httpsEchoServer.listen(0, LOOPBACK_HOST, resolve));
     httpsEchoPort = (httpsEchoServer.address() as any).port;
 
     // HTTP echo server
@@ -441,11 +453,12 @@ describe("multiplexer TLS detection", () => {
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify({ proto: "http", path: req.url }));
     });
-    await new Promise<void>((resolve) => httpEchoServer.listen(0, resolve));
+    await new Promise<void>((resolve) => httpEchoServer.listen(0, LOOPBACK_HOST, resolve));
     httpEchoPort = (httpEchoServer.address() as any).port;
 
     servers = await startProxyServer({
       port: 0,
+      listenHost: LOOPBACK_HOST,
       sniCallback: certMgr.getSNICallback(),
       onRequest: async (req: Request) => {
         const url = new URL(req.url);
@@ -514,5 +527,88 @@ describe("multiplexer TLS detection", () => {
 
     assert.equal(res.proto, "http");
     assert.equal(res.path, "/plain-test");
+  });
+});
+
+describe("proxy-server header normalization", () => {
+  it("strips hop-by-hop and connection-nominated request headers", () => {
+    const req = new Request("https://example.com/resource", {
+      headers: {
+        connection: "keep-alive, x-trace-id",
+        "content-length": "12",
+        host: "wrong.example.com",
+        "keep-alive": "timeout=5",
+        "proxy-authorization": "secret",
+        "x-forwarded-for": "1.2.3.4",
+        "x-trace-id": "abc123",
+      },
+    });
+
+    const normalized = normalizeUpstreamRequest(req);
+
+    assert.equal(normalized.headers.get("host"), "example.com");
+    assert.equal(normalized.headers.has("connection"), false);
+    assert.equal(normalized.headers.has("content-length"), false);
+    assert.equal(normalized.headers.has("keep-alive"), false);
+    assert.equal(normalized.headers.has("proxy-authorization"), false);
+    assert.equal(normalized.headers.has("x-trace-id"), false);
+    assert.equal(normalized.headers.get("x-forwarded-for"), "1.2.3.4");
+  });
+
+  it("strips hop-by-hop and connection-nominated response headers", () => {
+    const res = new Response("ok", {
+      headers: {
+        connection: "keep-alive, x-request-id",
+        "keep-alive": "timeout=5",
+        "proxy-authenticate": "Basic realm=test",
+        "transfer-encoding": "chunked",
+        "x-request-id": "trace-1",
+        "x-served-by": "wormhole",
+      },
+    });
+
+    const normalized = normalizeOutgoingResponse(res);
+
+    assert.equal(normalized.headers.has("connection"), false);
+    assert.equal(normalized.headers.has("keep-alive"), false);
+    assert.equal(normalized.headers.has("proxy-authenticate"), false);
+    assert.equal(normalized.headers.has("transfer-encoding"), false);
+    assert.equal(normalized.headers.has("x-request-id"), false);
+    assert.equal(normalized.headers.get("x-served-by"), "wormhole");
+  });
+});
+
+describe("proxy-server socket hardening", () => {
+  let tmpDir: string;
+  let certMgr: CertManager;
+
+  before(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "mwh-socket-"));
+    certMgr = new CertManager({ caDir: tmpDir });
+    certMgr.initCA();
+  });
+
+  after(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("closes idle sockets before the first byte arrives", async () => {
+    const servers = await startProxyServer({
+      port: 0,
+      listenHost: LOOPBACK_HOST,
+      sniCallback: certMgr.getSNICallback(),
+      onRequest: async (req: Request) => req,
+      onResponse: async (res: Response) => res,
+      firstByteTimeoutMs: 50,
+    });
+    const port = (servers.multiplexer.address() as net.AddressInfo).port;
+
+    try {
+      const socket = net.connect(port, LOOPBACK_HOST);
+      await once(socket, "close");
+      assert.equal(socket.destroyed, true);
+    } finally {
+      await servers.closeAll();
+    }
   });
 });

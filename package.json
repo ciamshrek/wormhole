@@ -4,10 +4,16 @@
   "description": "Docker-based transparent HTTPS proxy sidecar",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "check": "npm run typecheck && npm test && npm run build",
     "start": "node --import tsx src/index.ts",
     "dev": "tsx --watch src/index.ts",
     "generate-ca": "node --import tsx src/generate-ca.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --import tsx --test 'test/unit/**/*.test.ts'",
     "test:docker": "docker compose -f test/docker-compose.test.yml up --build --abort-on-container-exit"
   },

@@ -28,6 +28,7 @@ export function parseSNI(buf: Buffer): string | null {
   // Session ID: Length(1) + data
   if (offset + 1 > buf.length) return null;
   const sessionIdLength = buf[offset];
+  if (sessionIdLength === undefined) return null;
   offset += 1;
   if (offset + sessionIdLength > buf.length) return null;
   offset += sessionIdLength;
@@ -42,6 +43,7 @@ export function parseSNI(buf: Buffer): string | null {
   // Compression Methods: Length(1) + data
   if (offset + 1 > buf.length) return null;
   const compressionLength = buf[offset];
+  if (compressionLength === undefined) return null;
   offset += 1;
   if (offset + compressionLength > buf.length) return null;
   offset += compressionLength;
