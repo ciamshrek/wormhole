@@ -1,0 +1,59 @@
+# Auth0 Token Vault + DPoP + GitHub CLI
+#
+# Three services:
+#   proxy    — wormhole proxy that inserts credentials into requests outside the container
+#   agent    — DPoP device code flow → pack token → spawn gh
+#   connect  — companion app for Connected Accounts setup (one-time)
+#
+# Usage:
+#   cp .env.example .env   # or run terraform
+#   docker compose up --build
+
+services:
+  proxy:
+    build:
+      context: ../..
+      dockerfile: examples/gh-token-vault/Dockerfile.proxy
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - ./handler.ts:/app/handler.ts:ro
+      - ca-state:/var/lib/mwh-ca
+      - ca-certs:/etc/mwh
+    environment:
+      AUTH0_DOMAIN: ${AUTH0_DOMAIN}
+      AUTH0_RESOURCE_CLIENT_ID: ${AUTH0_RESOURCE_CLIENT_ID}
+      AUTH0_RESOURCE_CLIENT_SECRET: ${AUTH0_RESOURCE_CLIENT_SECRET}
+      AUTH0_CONNECTION: ${AUTH0_CONNECTION:-github}
+      ENABLE_DPOP: ${ENABLE_DPOP:-false}
+
+  agent:
+    build: ./agent
+    network_mode: "service:proxy"
+    depends_on:
+      proxy:
+        condition: service_healthy
+    volumes:
+      - ca-certs:/etc/mwh:ro
+    environment:
+      SSL_CERT_FILE: /etc/mwh/ca.crt
+      AUTH0_DOMAIN: ${AUTH0_DOMAIN}
+      AUTH0_CLIENT_ID: ${AUTH0_CLIENT_ID}
+      AUTH0_AUDIENCE: ${AUTH0_AUDIENCE}
+      AUTH0_CONNECTION: ${AUTH0_CONNECTION:-github}
+      ENABLE_DPOP: ${ENABLE_DPOP:-false}
+
+  connect:
+    build: ./connect
+    ports:
+      - "3001:3001"
+    environment:
+      AUTH0_DOMAIN: ${AUTH0_DOMAIN}
+      CONNECT_CLIENT_ID: ${CONNECT_CLIENT_ID}
+      CONNECT_CLIENT_SECRET: ${CONNECT_CLIENT_SECRET}
+      SESSION_SECRET: ${SESSION_SECRET}
+      AUTH0_CONNECTION: ${AUTH0_CONNECTION:-github}
+
+volumes:
+  ca-state:
+  ca-certs:

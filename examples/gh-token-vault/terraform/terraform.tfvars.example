@@ -1,0 +1,12 @@
+# Copy to terraform.tfvars and fill in
+
+# Auth0 tenant
+auth0_domain        = "your-tenant.us.auth0.com"
+auth0_tf_client_id  = ""  # M2M app with Management API access
+auth0_tf_client_secret = ""
+
+# GitHub OAuth App (https://github.com/settings/developers)
+# Homepage URL:  https://your-tenant.us.auth0.com
+# Callback URL:  https://your-tenant.us.auth0.com/login/callback
+github_oauth_client_id     = ""
+github_oauth_client_secret = ""
