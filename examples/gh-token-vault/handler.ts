@@ -77,11 +77,12 @@ async function validateDpop(
 // Token Vault exchange via openid-client
 // ---------------------------------------------------------------------------
 
-let ghTokenCache: { token: string; expiresAt: number } | null = null;
+const ghTokenCache = new Map<string, { token: string; expiresAt: number }>();
 
 async function getGitHubToken(subjectToken: string): Promise<string> {
-  if (ghTokenCache && ghTokenCache.expiresAt > Date.now() + 60_000) {
-    return ghTokenCache.token;
+  const cached = ghTokenCache.get(subjectToken);
+  if (cached && cached.expiresAt > Date.now() + 60_000) {
+    return cached.token;
   }
 
   const oidc = await getConfig();
@@ -100,10 +101,10 @@ async function getGitHubToken(subjectToken: string): Promise<string> {
     parameters
   );
 
-  ghTokenCache = {
+  ghTokenCache.set(subjectToken, {
     token: result.access_token!,
     expiresAt: Date.now() + ((result.expires_in ?? 3600) as number) * 1000,
-  };
+  });
 
   console.log(
     `[handler] Token Vault: GitHub token (expires in ${result.expires_in}s)`
