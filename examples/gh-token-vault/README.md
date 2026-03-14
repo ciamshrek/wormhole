@@ -36,19 +36,9 @@ Optionally, set `ENABLE_DPOP=true` to add **DPoP proof-of-possession** binding (
 
 We can further extend this concept to let agents run and execute code, which does not need access to sensitive credentials.
 
-## Auth0 architecture
-
-| Resource | Purpose |
-|---|---|
-| **API** (Resource Server) | Represents the proxy. Audience: `https://wormhole-proxy` |
-| **Resource Client** | Linked to the proxy API via `resource_server_identifier`. Calls Token Vault with its own `client_id`/`client_secret` |
-| **Agent App** (Native) | What the agent authenticates with. Device Code grant + MRRT |
-| **Connect App** (Regular Web) | Companion app for linking GitHub via Connected Accounts |
-| **GitHub Connection** | Social connection with Token Vault + Connected Accounts enabled |
-
-The Resource Client is the key relationship — it's what authorizes the proxy to exchange tokens for this specific API audience.
-
 ## Setup
+
+You can run this entire flow as easily as `docker compose up` but you need some pre-requisites. Most of the setup is taken care of for you.
 
 ### Prerequisites
 
@@ -63,7 +53,7 @@ Go to [GitHub Developer Settings](https://github.com/settings/developers) → OA
 
 | Field | Value |
 |---|---|
-| Homepage URL | `https://YOUR-TENANT.us.auth0.com` |
+| Homepage URL | `https://yourdomain.example.com/` |
 | Callback URL | `https://YOUR-TENANT.us.auth0.com/login/callback` |
 
 Save the **Client ID** and generate a **Client Secret**.
@@ -82,7 +72,7 @@ terraform init
 terraform apply
 ```
 
-This creates the API, Resource Client, Agent App, Connect App, GitHub connection (with Token Vault + Connected Accounts enabled), client grants, and MRRT policies. It writes a `.env` file with all the credentials.
+This will create and configure everything in Auth0, the API, Resource Client, Agent App, Connect App, GitHub connection (with Token Vault + Connected Accounts enabled), client grants, and MRRT policies. It writes a `.env` file with all the credentials.
 
 ### 4. Run
 
@@ -104,7 +94,7 @@ The agent prints an authorization URL. Open it and log in:
 ============================================================
 ```
 
-### 6. Connect GitHub
+### 6. Connect GitHub (One Time)
 
 If GitHub isn't linked yet, the agent waits and points you to the companion app:
 
@@ -117,6 +107,8 @@ If GitHub isn't linked yet, the agent waits and points you to the companion app:
 ```
 
 Open `http://localhost:3001`, log in, click **Connect GitHub Account**, and authorize on GitHub. The agent detects the connection and continues:
+
+### 7. Code Executes in the container
 
 ```
 GitHub connected!
@@ -151,38 +143,3 @@ golang/go
 ### Connect app (`connect/connect.ts`)
 
 Companion web app using [`@auth0/auth0-hono`](https://github.com/auth0-lab/auth0-hono). Lets a user log in, link their GitHub account via the Connected Accounts API, and disconnect it.
-
-### Security layers
-
-| Layer | What it does |
-|---|---|
-| **iptables sandbox** | All agent traffic forced through wormhole — no direct internet access |
-| **Audience scoping** | Auth0 token is only valid for the proxy API — useless with GitHub directly |
-| **Resource Client isolation** | Only the proxy's Resource Client can call Token Vault for this API audience |
-| **Token Vault** | Real GitHub credentials never enter the agent container |
-| **MRRT** | Single refresh token for multiple APIs — agent checks connection status via My Account API |
-| **DPoP** (optional) | Token bound to agent's ephemeral key — can't be replayed without the private key |
-
-## Files
-
-```
-.
-├── agent/
-│   ├── Dockerfile         # Node 24 + gh CLI
-│   ├── package.json       # dpop, openid-client
-│   └── agent.ts           # Device code flow + MRRT + connected accounts → spawn gh
-├── connect/
-│   ├── Dockerfile         # Node 24
-│   ├── package.json       # @auth0/auth0-hono, hono
-│   └── connect.ts         # Connected Accounts companion app
-├── terraform/
-│   ├── main.tf            # API, Resource Client, Agent App, Connect App, GitHub connection, MRRT
-│   ├── variables.tf
-│   ├── outputs.tf
-│   └── terraform.tfvars.example
-├── handler.ts             # Token Vault exchange (+ optional DPoP validation)
-├── Dockerfile.proxy       # Wormhole base + jose, openid-client
-├── docker-compose.yml
-├── .env.example
-└── README.md
-```
