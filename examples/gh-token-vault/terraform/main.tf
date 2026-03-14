@@ -160,7 +160,7 @@ resource "auth0_client_grant" "connect_my_account" {
 }
 
 # =============================================================================
-# 7. GitHub Social Connection — Token Vault must be enabled in the dashboard
+# 7. GitHub Social Connection — Token Vault + Connected Accounts
 #
 #    Prerequisite: Create a GitHub OAuth App at
 #    https://github.com/settings/developers with:

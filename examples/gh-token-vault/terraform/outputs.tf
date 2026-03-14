@@ -19,22 +19,14 @@ output "connect_client_id" {
 }
 
 output "next_steps" {
-  description = "Manual steps after terraform apply"
+  description = "Steps after terraform apply"
   value       = <<-EOT
 
-    .env written to ../. Manual steps:
+    .env written to ../.
 
-    1. Enable Token Vault on the GitHub connection:
-       Auth0 Dashboard → Authentication → Social → github
-       → scroll to "Connected Accounts for Token Vault" → Enable
-
-    2. Enable Multi-Resource Refresh Tokens (MRRT):
-       Auth0 Dashboard → Settings → Advanced
-       → "Multi-Resource Refresh Tokens" → Enable
-
-    3. Run the demo:
-       cd ..
-       docker compose up --build
+    Run the demo:
+      cd ..
+      docker compose up --build
 
   EOT
 }

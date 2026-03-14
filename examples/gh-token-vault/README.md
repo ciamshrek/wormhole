@@ -1,6 +1,6 @@
 # GitHub CLI agent with Auth0 Token Vault
 
-An agent container runs `gh repo list` and other GitHub CLI commands — without ever having GitHub credentials. Wormhole transparently injects user-bound GitHub tokens via [Auth0 Token Vault](https://auth0.com/docs/secure/call-apis-on-users-behalf/token-vault/configure-token-vault).
+An agent runs `gh repo list` and other GitHub CLI commands — without ever having GitHub credentials. We transparently inject user-bound GitHub tokens via [Auth0 Token Vault](https://auth0.com/docs/secure/call-apis-on-users-behalf/token-vault/configure-token-vault).
 
 ```mermaid
 sequenceDiagram
@@ -16,8 +16,8 @@ sequenceDiagram
     User->>Auth0: Authorize
     Auth0-->>Agent: access token + MRRT
 
-    Agent->>Agent: GH_TOKEN = token
-    Agent->>Proxy: gh repo list → Authorization: token <auth0-token>
+    Agent->>Agent: GH_TOKEN = auth0 access-token
+    Agent->>Proxy: gh repo list → Authorization: token <auth0 access-token>
     Proxy->>Auth0: Token Vault exchange (Resource Client)
     Auth0-->>Proxy: GitHub access token
     Proxy->>GH: Authorization: token <real-github-token>
