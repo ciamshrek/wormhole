@@ -1,0 +1,36 @@
+# GitHub CLI with credentials outside the container
+#
+# The agent runs gh commands with no GitHub token.
+# The proxy intercepts requests to api.github.com and injects GH_TOKEN.
+#
+# Usage:
+#   GH_TOKEN=ghp_your_token docker compose up --build
+
+services:
+  proxy:
+    build:
+      context: ../..
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - ./handler.ts:/app/handler.ts:ro
+      - ca-state:/var/lib/mwh-ca
+      - ca-certs:/etc/mwh
+    environment:
+      GH_TOKEN: ${GH_TOKEN}
+
+  agent:
+    build: ./agent
+    network_mode: "service:proxy"
+    depends_on:
+      proxy:
+        condition: service_healthy
+    volumes:
+      - ca-certs:/etc/mwh:ro
+    environment:
+      SSL_CERT_FILE: /etc/mwh/ca.crt
+      GH_TOKEN: _  # dummy — handler replaces with real token
+
+volumes:
+  ca-state:
+  ca-certs:
