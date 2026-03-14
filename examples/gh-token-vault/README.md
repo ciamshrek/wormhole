@@ -25,14 +25,16 @@ sequenceDiagram
     Proxy-->>Agent: repos
 ```
 
-## What makes this interesting
+## So what
 
-The agent's credential is an Auth0 access token — **not** a GitHub PAT. It's:
+The container's credential is an Auth0 access token — **not** a GitHub Token. This token is:
 
-- **Audience-scoped** — only valid for the proxy API, useless with GitHub directly
+- **Audience-scoped** — only valid for the proxy, useless with GitHub directly.
 - **Transparently exchanged** — the proxy swaps it for a real GitHub token via Token Vault; `gh` CLI runs completely unmodified
 
-Optionally, set `ENABLE_DPOP=true` to add **DPoP proof-of-possession** binding (requires a paid Auth0 plan). With DPoP, the token is tied to an ephemeral key pair in the agent's process memory — even if the token leaks, it's worthless without the private key.
+Optionally, set `ENABLE_DPOP=true` to add **DPoP proof-of-possession** binding (requires a paid Auth0 plan). With DPoP, the token is tied to an ephemeral or non-extractable key pair. In which case, even if the token leaks, it's worthless without the private key. 
+
+We can further extend this concept to let agents run and execute code, which does not need access to sensitive credentials.
 
 ## Auth0 architecture
 
