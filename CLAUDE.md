@@ -31,7 +31,7 @@ The proxy runs as UID 1337. iptables redirects all non-DNS TCP from other UIDs t
 - **`onRequest` can return `Response`** — allows short-circuiting (blocking, mocking) without hitting upstream
 - **Handler errors → passthrough** — if a hook throws, the original request/response proceeds unmodified
 - **Body cloning** — handler-loader clones req/res before passing to hooks so the original body survives errors
-- **`wormhole-ca-init.sh`** — shipped in shared volume, installs CA into system trust store + sets runtime env vars (NODE_OPTIONS, NODE_EXTRA_CA_CERTS, SSL_CERT_FILE, REQUESTS_CA_BUNDLE)
+- **`wormhole-ca-init.sh`** — shipped in the app-visible trust volume, installs the public CA into the system trust store + sets runtime env vars (NODE_OPTIONS, NODE_EXTRA_CA_CERTS, SSL_CERT_FILE, REQUESTS_CA_BUNDLE)
 
 ## Commands
 
@@ -56,3 +56,4 @@ npm run test:docker    # Full E2E — iptables + proxy → httpbin.org
 - `ca-certificates` package is not installed in the proxy image
 - Healthcheck uses `nc -z 127.0.0.1 3129` — app containers use `depends_on: condition: service_healthy`
 - `handler.ts` is bind-mounted read-only, hot-reloaded via `fs.watchFile` (polling, not inotify — works on Docker bind mounts)
+- The app-visible trust volume contains only `ca.crt` + `wormhole-ca-init.sh`; the CA private key stays in the proxy-only state volume

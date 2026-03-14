@@ -1,6 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
+export MWH_CA_DIR="${MWH_CA_DIR:-/var/lib/mwh-ca}"
+export MWH_TRUST_DIR="${MWH_TRUST_DIR:-/etc/mwh}"
+
 echo "[entrypoint] Starting wormhole setup..."
 
 # Create proxy user (UID 1337) for loop prevention
@@ -8,9 +11,9 @@ if ! id -u mwhproxy >/dev/null 2>&1; then
   adduser -S -H -u 1337 mwhproxy 2>/dev/null || useradd --system --no-create-home --uid 1337 mwhproxy
 fi
 
-# Ensure CA directory exists and is writable by mwhproxy
-mkdir -p /etc/mwh
-chown mwhproxy /etc/mwh
+# Ensure private signer state and app-visible trust directories exist
+mkdir -p "$MWH_CA_DIR" "$MWH_TRUST_DIR"
+chown mwhproxy "$MWH_CA_DIR"
 
 # Generate CA as mwhproxy user
 echo "[entrypoint] Generating CA certificate..."
@@ -19,9 +22,11 @@ su -s /bin/sh mwhproxy -c "node --import tsx src/generate-ca.ts" || {
   exit 1
 }
 
-# Copy CA init script to shared volume so app containers can use it
-cp /app/wormhole-ca-init.sh /etc/mwh/wormhole-ca-init.sh
-chmod +x /etc/mwh/wormhole-ca-init.sh
+# Publish only the public CA cert + init script for app containers
+cp "$MWH_CA_DIR/ca.crt" "$MWH_TRUST_DIR/ca.crt"
+chmod 0644 "$MWH_TRUST_DIR/ca.crt"
+cp /app/wormhole-ca-init.sh "$MWH_TRUST_DIR/wormhole-ca-init.sh"
+chmod +x "$MWH_TRUST_DIR/wormhole-ca-init.sh"
 
 # iptables: bypass DNS over TCP, then redirect other outbound TCP to the multiplexer
 echo "[entrypoint] Setting up iptables redirect..."

@@ -5,6 +5,7 @@ services:
       - NET_ADMIN
     volumes:
       - ./handler.ts:/app/handler.ts:ro
+      - ca-state:/var/lib/mwh-ca
       - ca-certs:/etc/mwh
 
   app:
@@ -24,4 +25,5 @@ services:
     #   NODE_EXTRA_CA_CERTS: /etc/mwh/ca.crt
 
 volumes:
+  ca-state:
   ca-certs:

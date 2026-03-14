@@ -6,6 +6,7 @@ services:
       - NET_ADMIN
     volumes:
       - ../../handler.ts:/app/handler.ts:ro
+      - ca-state:/var/lib/mwh-ca
       - ca-certs:/etc/mwh
 
   curl:
@@ -27,4 +28,5 @@ services:
           "$TARGET_URL"
 
 volumes:
+  ca-state:
   ca-certs:

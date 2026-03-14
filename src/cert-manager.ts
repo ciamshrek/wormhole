@@ -23,7 +23,7 @@ export class CertManager {
   private caDir: string;
 
   constructor(opts?: { caDir?: string; maxCacheSize?: number }) {
-    this.caDir = opts?.caDir ?? (process.env.MWH_CA_DIR || "/etc/mwh");
+    this.caDir = opts?.caDir ?? (process.env.MWH_CA_DIR || "/var/lib/mwh-ca");
     this.maxCacheSize = opts?.maxCacheSize ?? 1000;
   }
 

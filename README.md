@@ -84,6 +84,7 @@ services:
       - NET_ADMIN
     volumes:
       - ./handler.ts:/app/handler.ts:ro
+      - ca-state:/var/lib/mwh-ca
       - ca-certs:/etc/mwh
 
   app:
@@ -99,6 +100,7 @@ services:
     command: ["node", "app.js"]
 
 volumes:
+  ca-state:
   ca-certs:
 ```
 
@@ -176,7 +178,7 @@ If your handler throws, the proxy logs the error and falls back to passthrough b
 
 ## CA Trust
 
-The proxy generates a CA certificate at `/etc/mwh/ca.crt` on first startup. Your app container must trust this CA for HTTPS interception to work.
+The proxy keeps its CA private key in its private state volume and publishes only the public CA cert to `/etc/mwh/ca.crt`. Your app container must trust that public cert for HTTPS interception to work.
 
 ### Option A: System trust store (recommended)
 
@@ -219,7 +221,8 @@ keytool -importcert -noprompt -trustcacerts \
 | Environment Variable | Default | Description |
 |---------------------|---------|-------------|
 | `MWH_PORT` | `3129` | Port the multiplexer listens on |
-| `MWH_CA_DIR` | `/etc/mwh` | Directory for CA cert and key |
+| `MWH_CA_DIR` | `/var/lib/mwh-ca` | Proxy-only directory for the CA cert and private key |
+| `MWH_TRUST_DIR` | `/etc/mwh` | App-visible directory for the public CA cert and trust bootstrap script |
 | `MWH_HANDLER_PATH` | `handler.ts` | Path to the handler file |
 | `MWH_FIRST_BYTE_TIMEOUT` | `10000` | Milliseconds to wait before dropping an idle client connection that never sends a request |
 | `MWH_UPSTREAM_TIMEOUT` | `30000` | Upstream request timeout in ms |
