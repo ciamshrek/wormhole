@@ -1,6 +1,9 @@
 # GitHub CLI agent with Auth0 Token Vault
 
-An agent runs `gh repo list` and other GitHub CLI commands — without ever having GitHub credentials. We transparently inject user-bound GitHub tokens via [Auth0 Token Vault](https://auth0.com/docs/secure/call-apis-on-users-behalf/token-vault/configure-token-vault).
+Untrusted code from an agent runs inside a container and uses the unmodified `gh` CLI. This container or the `gh` cli never grant access to the user's raw GitHub credential. 
+
+Instead, the user's tokens are securely stored in [Auth0 Token Vault](https://auth0.com/docs/secure/call-apis-on-users-behalf/token-vault/configure-token-vault). The `gh` CLI makes calls using an Auth0 issued access token, and the actual GitHub token is inserted on the fly by the proxy.
+
 
 ```mermaid
 sequenceDiagram
